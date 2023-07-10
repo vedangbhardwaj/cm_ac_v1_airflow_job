@@ -1,17 +1,9 @@
-# -- individual tables - write 
-# -- combination function 
-#     - 50-50% loan ids from the base table -  analytics.dbt_prod.dpd1_totf_snap_new - mutually exclusion 
-#     - where loan id - individual table (50) - DS -> top 65
-#     - where loan id - individual table (50) - ANL -> top 65
-#     - UNION- cols, MODEL_TYPE - DS, ANL - write Snowflake
-#     - csv - ghseet - TC July sheet link - Ansaf
-
-
-
 from airflow.models import DAG, Variable
 from airflow.operators.dummy import DummyOperator
 from airflow.operators.python import PythonOperator
 from airflow.sensors.external_task import ExternalTaskSensor
+from airflow.providers.dbt.cloud.operators.dbt import DbtCloudRunJobOperator
+
 from airflow.models import DagRun
 import os
 import sys
@@ -21,7 +13,7 @@ import logging
 # dbt job trigger operator
 
 
-sys.path.append("/Users/vedang.bhardwaj/Desktop/work_mode/collections_Model/dags_v2/dag_may_model_refresh")
+# sys.path.append("/Users/vedang.bhardwaj/Desktop/work_mode/collections_Model/dags_v2/dag_may_model_refresh")
 
 # sys.path.append("/opt/airflow/dags/repo/dags/template/")
 # import kubernetes_resources as kubernetes
@@ -68,6 +60,8 @@ config_resource = Variable.get("collections_model_dags_v1", deserialize_json=Tru
     "kubernetes_executor"
 ]
 
+job_id = config["job_id"]
+
 resource_config = {
     "KubernetesExecutor": {
         "request_memory": "7000Mi",
@@ -100,7 +94,6 @@ args = {
     # 'on_failure_callback':intimate_of_failure_on_slack
 }
 
-
 def _get_start_date(**kwargs):
     user_provided_data_start_date = kwargs["dag_run"].conf.get("data_start_date")
 
@@ -119,7 +112,6 @@ def _get_start_date(**kwargs):
     kwargs["ti"].xcom_push(key="start_date", value=str(data_start_date))
     logging.info("start_date: %s", data_start_date)
 
-
 def generate_dag(dataset_name):
     with DAG(
         dag_id=f"collections_{dataset_name.lower()}_dag_v1",
@@ -131,6 +123,15 @@ def generate_dag(dataset_name):
         catchup=False,
     ) as dag:
         start = DummyOperator(task_id=f"{dataset_name}", dag=dag)
+
+        feature_creation = DbtCloudRunJobOperator(
+            task_id='trigger_dbt_job_{job_id}'.format(job_id=job_id),
+            job_id=job_id,
+            check_interval=60,
+            dbt_cloud_conn_id="dbt",
+            timeout=1800,
+            dag=dag
+        )
 
         get_start_date = PythonOperator(
             task_id="get_start_date",
@@ -149,105 +150,105 @@ def generate_dag(dataset_name):
             trigger_rule="none_failed",
         )
 
-    start >> get_start_date >> model_run
+    start >> feature_creation>> get_start_date >> model_run
     return dag
 
 
-def combined_prediction_dag(prediction_name, external_task_id):
-    with DAG(
-        dag_id=f"uw_{prediction_name.lower()}_dag_v6",
-        default_args=args,
-        schedule_interval=None,
-        max_active_runs=1,
-        max_active_tasks=1,
-        tags=["ds", "collections", "lending", "model"],
-        catchup=False,
-    ) as dag:
+# def combined_prediction_dag(prediction_name, external_task_id):
+#     with DAG(
+#         dag_id=f"uw_{prediction_name.lower()}_dag_v6",
+#         default_args=args,
+#         schedule_interval=None,
+#         max_active_runs=1,
+#         max_active_tasks=1,
+#         tags=["ds", "collections", "lending", "model"],
+#         catchup=False,
+#     ) as dag:
 
-        def get_most_recent_dag_run(dag_id):
-            dag_runs = DagRun.find(dag_id=dag_id)
-            dag_runs.sort(key=lambda x: x.execution_date, reverse=True)
-            if dag_runs:
-                return dag_runs[0].execution_date
+#         def get_most_recent_dag_run(dag_id):
+#             dag_runs = DagRun.find(dag_id=dag_id)
+#             dag_runs.sort(key=lambda x: x.execution_date, reverse=True)
+#             if dag_runs:
+#                 return dag_runs[0].execution_date
 
-        start = DummyOperator(task_id=f"{prediction_name}", dag=dag)
+#         start = DummyOperator(task_id=f"{prediction_name}", dag=dag)
 
-        kb_txn_module_wait = ExternalTaskSensor(
-            task_id="kb_txn_module_wait",
-            # poke_interval=60,
-            # timeout=180,
-            # soft_fail=False,
-            # retries=2,
-            external_dag_id="uw_kb_txn_module_dag_v6",
-            external_task_id=external_task_id,
-            execution_date_fn=lambda dt: get_most_recent_dag_run(
-                "uw_kb_txn_module_dag_v6"
-            ),
-            check_existence=True,
-            mode="reschedule",
-        )
-        kb_sms_module_wait = ExternalTaskSensor(
-            task_id="kb_sms_module_wait",
-            external_dag_id="uw_kb_sms_module_dag_v6",
-            external_task_id=external_task_id,
-            execution_date_fn=lambda dt: get_most_recent_dag_run(
-                "uw_kb_sms_module_dag_v6"
-            ),
-            mode="reschedule",
-        )
-        kb_bureau_module_wait = ExternalTaskSensor(
-            task_id="kb_bureau_module_wait",
-            external_dag_id="uw_kb_bureau_module_dag_v6",
-            external_task_id=external_task_id,
-            execution_date_fn=lambda dt: get_most_recent_dag_run(
-                "uw_kb_bureau_module_dag_v6"
-            ),
-            mode="reschedule",
-        )
+#         kb_txn_module_wait = ExternalTaskSensor(
+#             task_id="kb_txn_module_wait",
+#             # poke_interval=60,
+#             # timeout=180,
+#             # soft_fail=False,
+#             # retries=2,
+#             external_dag_id="uw_kb_txn_module_dag_v6",
+#             external_task_id=external_task_id,
+#             execution_date_fn=lambda dt: get_most_recent_dag_run(
+#                 "uw_kb_txn_module_dag_v6"
+#             ),
+#             check_existence=True,
+#             mode="reschedule",
+#         )
+#         kb_sms_module_wait = ExternalTaskSensor(
+#             task_id="kb_sms_module_wait",
+#             external_dag_id="uw_kb_sms_module_dag_v6",
+#             external_task_id=external_task_id,
+#             execution_date_fn=lambda dt: get_most_recent_dag_run(
+#                 "uw_kb_sms_module_dag_v6"
+#             ),
+#             mode="reschedule",
+#         )
+#         kb_bureau_module_wait = ExternalTaskSensor(
+#             task_id="kb_bureau_module_wait",
+#             external_dag_id="uw_kb_bureau_module_dag_v6",
+#             external_task_id=external_task_id,
+#             execution_date_fn=lambda dt: get_most_recent_dag_run(
+#                 "uw_kb_bureau_module_dag_v6"
+#             ),
+#             mode="reschedule",
+#         )
 
-        get_start_date = PythonOperator(
-            task_id="get_start_date",
-            provide_context=True,
-            python_callable=_get_start_date,
-            dag=dag,
-        )
+#         get_start_date = PythonOperator(
+#             task_id="get_start_date",
+#             provide_context=True,
+#             python_callable=_get_start_date,
+#             dag=dag,
+#         )
 
-        combined_model_prediction = PythonOperator(
-            task_id="combined_model_prediction",
-            execution_timeout=timedelta(minutes=60),
-            provide_context=True,
-            op_kwargs={"dataset_name": prediction_name},
-            python_callable=globals()[prediction_name].predict,
-            # executor_config=resource_config,
-        )
-        generate_result = PythonOperator(
-            task_id="generate_result",
-            execution_timeout=timedelta(minutes=60),
-            provide_context=True,
-            op_kwargs={"dataset_name": prediction_name},
-            python_callable=globals()[prediction_name].result_generation,
-            # executor_config=combined_resource_config,
-        )
-        write_master_table = PythonOperator(
-            task_id="write_data_master_table",
-            execution_timeout=timedelta(minutes=60),
-            provide_context=True,
-            op_kwargs={"dataset_name": prediction_name},
-            python_callable=globals()[prediction_name].merge_master_table,
-            # executor_config=combined_resource_config,
-        )
-    start >> [kb_txn_module_wait, kb_sms_module_wait, kb_bureau_module_wait]
-    (
-        [
-            kb_txn_module_wait,
-            kb_sms_module_wait,
-            kb_bureau_module_wait,
-        ]
-        >> get_start_date
-        >> combined_model_prediction
-    )
-    combined_model_prediction >> generate_result >> write_master_table
-    return dag
+#         combined_model_prediction = PythonOperator(
+#             task_id="combined_model_prediction",
+#             execution_timeout=timedelta(minutes=60),
+#             provide_context=True,
+#             op_kwargs={"dataset_name": prediction_name},
+#             python_callable=globals()[prediction_name].predict,
+#             # executor_config=resource_config,
+#         )
+#         generate_result = PythonOperator(
+#             task_id="generate_result",
+#             execution_timeout=timedelta(minutes=60),
+#             provide_context=True,
+#             op_kwargs={"dataset_name": prediction_name},
+#             python_callable=globals()[prediction_name].result_generation,
+#             # executor_config=combined_resource_config,
+#         )
+#         write_master_table = PythonOperator(
+#             task_id="write_data_master_table",
+#             execution_timeout=timedelta(minutes=60),
+#             provide_context=True,
+#             op_kwargs={"dataset_name": prediction_name},
+#             python_callable=globals()[prediction_name].merge_master_table,
+#             # executor_config=combined_resource_config,
+#         )
+#     start >> [kb_txn_module_wait, kb_sms_module_wait, kb_bureau_module_wait]
+#     (
+#         [
+#             kb_txn_module_wait,
+#             kb_sms_module_wait,
+#             kb_bureau_module_wait,
+#         ]
+#         >> get_start_date
+#         >> combined_model_prediction
+#     )
+#     combined_model_prediction >> generate_result >> write_master_table
+#     return dag
 
 
 # def gini_psi_calculation(dataset_name, external_task_id):
@@ -363,3 +364,27 @@ for dataset in ["DS_MODEL","ANALYTICS_MODEL"]:
 #     globals()[f"{dataset.lower()}_dag_v6"] = gini_psi_calculation(
 #         dataset_name=dataset, external_task_id="write_data_master_table"
 #     )
+
+# workflow
+# -- individual tables - write 
+# -- combination function 
+#     - 50-50% loan ids from the base table -  analytics.dbt_prod.dpd1_totf_snap_new - mutually exclusion 
+#     - where loan id - individual table (50) - DS -> top 65
+#     - where loan id - individual table (50) - ANL -> top 65
+#     - UNION- cols, MODEL_TYPE - DS, ANL - write Snowflake
+#     - csv - ghseet - TC July sheet link - Ansaf
+
+# -- Select mutually exclusive LOAN_IDs for table A and B
+# WITH shuffled_base AS (
+#   SELECT LOAN_ID, ROW_NUMBER() OVER (ORDER BY RAND()) AS row_num
+#   FROM base
+# )
+# INSERT INTO A
+# SELECT LOAN_ID
+# FROM shuffled_base
+# WHERE row_num <= (SELECT COUNT(*) / 2 FROM base);
+
+# INSERT INTO B
+# SELECT LOAN_ID
+# FROM shuffled_base
+# WHERE row_num > (SELECT COUNT(*) / 2 FROM base);

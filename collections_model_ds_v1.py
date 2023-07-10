@@ -1,9 +1,9 @@
 ## Data processing
 import pandas as pd
 import numpy as np
-import get_data as gd
-from utility_functions import get_connector, get_raw_data, truncate_table, write_to_snowflake, read_file
-import utility_functions as uf
+import collections_model_get_data_v1 as gd
+from collections_model_utility_functions_v1 import get_connector, get_raw_data, truncate_table, write_to_snowflake, read_file
+import collections_model_utility_functions_v1 as uf
 # Model and performance evaluation
 from sklearn.metrics import roc_curve, auc, precision_score, recall_score
 ## unpickling the model
@@ -37,13 +37,11 @@ def remove_inconsistent_values(df,feature_list):
             # pass
     return df
 
-def model_run(dataset_name,**kwargs):
+def model_run():
     start_date = '2023-06-02'
     end_date = '2023-06-03'
     # get data
     data= get_raw_data(start_date,end_date,cur,gd.query)
-
-    data['FULL_DATE'].min()
 
     # pick only selected features utilized in model
     feature_list=pd.read_csv(
@@ -62,7 +60,12 @@ def model_run(dataset_name,**kwargs):
 
     # run predictions and store the result 
     data['Pred_PD']=model.predict_proba(data_filter)[:,1]
-    data['Pred_PD_binary_tc_thresh'] = np.where(data['Pred_PD']>0.5,1,0)
+
+    # finding threshold value for 35% prediction coverage
+    threshold_value = uf.find_threshold(data,uf.cut_off)
+
+    # converting threshold cut to binary
+    data['Pred_PD_binary_tc_thresh'] = np.where(data['Pred_PD']>threshold_value,1,0)
 
 
     # store only relevant info:
@@ -80,10 +83,10 @@ def model_run(dataset_name,**kwargs):
     print(f'Gini on Val data with XGBoost: {GINI_Val}')
 
     # write back to snowflake:
-    truncate_table("DoD_results", "cm_ac_vanilla_v1_".lower(),cur)
+    truncate_table("dod_results", "cm_ac_vanilla_v1".lower(),cur)
 
     # write temp DoD table:
-    write_to_snowflake(data_write, "DoD_results", "cm_ac_vanilla_v1_".lower())
+    write_to_snowflake(data_write, "dod_results", "cm_ac_vanilla_v1".lower())
 
     # merge back to master result table
     # merge()
@@ -91,3 +94,4 @@ def model_run(dataset_name,**kwargs):
     conn.close()
 
 model_run()
+

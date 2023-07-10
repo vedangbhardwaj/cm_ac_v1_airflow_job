@@ -1,6 +1,6 @@
 import pandas as pd
 #### importing Initial declaration ###
-import initial_declaration as idc
+import collections_model_initial_declaration_v1 as idc
 
 query = """
     select  

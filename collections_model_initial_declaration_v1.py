@@ -3,8 +3,8 @@ import pandas as pd
 import boto3
 # airflow 
 from airflow.models import Variable
-from utility_functions import read_file
-import utility_functions as uf
+from collections_model_utility_functions_v1 import read_file
+import collections_model_utility_functions_v1 as uf
 
 
 config = Variable.get("collections_model_dags_v1", deserialize_json=True)
@@ -28,5 +28,5 @@ var_threshold=0.70  ### 75% of variantion in the features gets captured with PCA
 ID_cols=['USER_ID','LOAN_ID','FULL_DATE','AUTO_CURE_FLAG']
 
 feature_list = pd.read_csv(
-    read_file(s3_bucket, uf.model_path + "cm_ac_model_v1_features.csv")
+    read_file(uf.s3_bucket, uf.model_path + "cm_ac_model_v1_features.csv")
 )
