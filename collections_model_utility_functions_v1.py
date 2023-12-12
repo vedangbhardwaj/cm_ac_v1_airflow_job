@@ -27,6 +27,7 @@ input_path = config_var["input_path"]
 data_path = config_var["data_path"]
 model_path = config_var["model_path"]
 cut_off = config["cut_off"]
+cut_off_analytics = config["cut_off"] 
 
 def read_file(bucket_name, file_name):
     obj = s3.meta.client.get_object(Bucket=bucket_name, Key=file_name)
@@ -125,7 +126,7 @@ def write_to_snowflake(data, identifier, dataset_name):
     )
     return
 
-def find_threshold(data,cut_off):
+def find_threshold(data,cut_off,model):
     auto_cure_rate_Val=[]
     auto_cure_count_Val=[]
     auto_cure_model_predict_count_Val=[]
@@ -133,7 +134,10 @@ def find_threshold(data,cut_off):
     threshold_select = pd.DataFrame()
 
     for th in np.arange(0,1,0.001):
-        data['XGB_Model_decision']=[1 if x>=th else 0 for x in data['Pred_PD']]
+        if model == "DS":
+            data['XGB_Model_decision']=[1 if x>=th else 0 for x in data['Predicted_probability']]
+        if model == "ANALYTICS":
+            data['XGB_Model_decision']=[1 if x<=th else 0 for x in data['Predicted_probability']]
         auto_cure_count_predicted_Val=data[( data['XGB_Model_decision']==1)].shape[0]
         # print("auto_cure_count_predicted_Val",auto_cure_count_predicted_Val)
         auto_cure_rate_predicted_Val= np.nan_to_num(data[( data['XGB_Model_decision']==1)].shape[0]/data.shape[0],nan=0)
@@ -142,25 +146,25 @@ def find_threshold(data,cut_off):
         # Actual_Auto_cure_Model_Val=np.nan_to_num((data[(data['AUTO_CURE_FLAG']==1) & (data['XGB_Model_decision']==1)].shape[0]/auto_cure_count_predicted_Val),nan=0)
 
         # using np.where
-        if auto_cure_count_predicted_Val != 0:
-            Actual_Auto_cure_Model_Val=np.nan_to_num((data[(data['AUTO_CURE_FLAG']==1) & (data['XGB_Model_decision']==1)].shape[0]/auto_cure_count_predicted_Val),nan=0)
-        else:
-            Actual_Auto_cure_Model_Val = 0
+        # if auto_cure_count_predicted_Val != 0:
+        #     Actual_Auto_cure_Model_Val=np.nan_to_num((data[(data['AUTO_CURE_FLAG']==1) & (data['XGB_Model_decision']==1)].shape[0]/auto_cure_count_predicted_Val),nan=0)
+        # else:
+        #     Actual_Auto_cure_Model_Val = 0
 
         auto_cure_count_Val.append(auto_cure_count_predicted_Val)
         auto_cure_model_predict_count_Val.append(auto_cure_rate_predicted_Val)
-        auto_cure_rate_Val.append(Actual_Auto_cure_Model_Val)
+        # auto_cure_rate_Val.append(Actual_Auto_cure_Model_Val)
 
     threshold_select['threshold']= np.arange(0,1,0.001)
     threshold_select['auto_cure_count_predicted_Val']=auto_cure_count_Val
     threshold_select['auto_cure_rate_predicted_Val']=auto_cure_model_predict_count_Val
-    threshold_select['Actual_Auto_cure_Model_Val']=auto_cure_rate_Val
+    # threshold_select['Actual_Auto_cure_Model_Val']=auto_cure_rate_Val
 
     threshold_select.sort_values(['auto_cure_rate_predicted_Val'],inplace=True)
 
     print(threshold_select.loc[(threshold_select['auto_cure_rate_predicted_Val']>=cut_off)].head(50))
 
     threshold_value = threshold_select.loc[(threshold_select['auto_cure_rate_predicted_Val']>=cut_off).idxmax()]['threshold']
-    threshold_value
+    print(f"threshold value : {threshold_value}")
 
     return threshold_value
